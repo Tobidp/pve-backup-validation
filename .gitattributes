@@ -1,0 +1,10 @@
+# Normalize line endings on commit; force LF on checkout for files that run on Linux.
+* text=auto eol=lf
+
+# Shell script and runtime config must be LF (CRLF breaks the shebang / parsing).
+*.sh   text eol=lf
+*.env  text eol=lf
+*.conf text eol=lf
+
+# Documentation
+*.md text eol=lf
