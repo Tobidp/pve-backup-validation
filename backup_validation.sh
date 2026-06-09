@@ -113,6 +113,15 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
+# Quote-safe trim: drops CR (Windows line endings) and leading/trailing whitespace.
+# Pure bash — unlike xargs, it never chokes on unbalanced quotes.
+trim() {
+    local s="${1//$'\r'/}"
+    s="${s#"${s%%[![:space:]]*}"}"   # remove leading whitespace
+    s="${s%"${s##*[![:space:]]}"}"   # remove trailing whitespace
+    printf '%s' "$s"
+}
+
 format_duration() {
     local seconds=$1
     local h=$(( seconds / 3600 ))
@@ -399,7 +408,7 @@ check_systemd() {
     local props
     props=$(guest_exec "$vmid" /bin/bash -c \
         "systemctl show '$service' -p ActiveState,SubState,Result 2>/dev/null | tr '\n' ' '")
-    props=$(echo "$props" | tr -d '\r' | xargs)
+    props=$(trim "$props")
     LAST_SYSTEMD_DETAIL="${result}${props:+ — $props}"
 
     log "SYSTEMD_FAIL | VMID=$vmid | SERVICE=$service | STATUS=$result | $props"
@@ -1041,13 +1050,14 @@ main() {
     fi
 
     while IFS=';' read -r orig_vmid mode overrides || [[ -n "$orig_vmid" ]]; do
-        # Tolerate CRLF (file edited on Windows) and surrounding spaces
-        orig_vmid=$(echo "$orig_vmid" | tr -d '\r' | xargs)
-        mode=$(echo "${mode:-auto}" | tr -d '\r' | xargs)
-        overrides=$(echo "${overrides:-}" | tr -d '\r' | xargs)
-
+        # Tolerate CRLF and surrounding spaces; skip comments/blanks early
+        orig_vmid=$(trim "$orig_vmid")
         [[ "$orig_vmid" =~ ^# ]] && continue
         [[ -z "$orig_vmid" ]] && continue
+
+        mode=$(trim "${mode:-auto}")
+        [[ -z "$mode" ]] && mode="auto"
+        overrides=$(trim "${overrides:-}")
 
         local temp_vmid="${TEMP_VMID_PREFIX}${orig_vmid}"
         (( TOTAL_VMS++ ))

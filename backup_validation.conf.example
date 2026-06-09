@@ -3,18 +3,18 @@
 #
 # Install as: /root/backup_validation.conf
 #
-# One VM per line. Fields separated by ';':
-#   vmid ; mode ; overrides
+# One VM per line. Three fields, separated by semicolons:
+#   vmid : mode : overrides   (shown here with : to avoid the real separator)
 #
 #   vmid       Original VMID of the VM whose latest PBS backup will be restored
-#   mode       auto | hybrid | manual   (default: auto if omitted)
-#                - auto   : only auto-discovered services are validated
-#                - hybrid : auto-discovered services + overrides
-#                - manual : only the services listed in overrides
-#   overrides  "service:port,service:port"  (used in hybrid/manual)
+#   mode       auto | hybrid | manual   (default auto if omitted)
+#                - auto    only auto-discovered services are validated
+#                - hybrid  auto-discovered services plus overrides
+#                - manual  only the services listed in overrides
+#   overrides  service:port,service:port   (used in hybrid/manual)
 #                port 0 = skip the port/HTTP check (systemd check only)
 #
-# Lines starting with '#' and blank lines are ignored.
+# Lines starting with a hash and blank lines are ignored.
 # Save with LF (Unix) line endings.
 # ==============================================================================
 
