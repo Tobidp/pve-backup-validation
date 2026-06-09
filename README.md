@@ -142,7 +142,12 @@ runtime), **not** in the script:
 ```bash
 TELEGRAM_TOKEN="your_token_here"
 TELEGRAM_CHAT_ID="your_chat_id_here"
+# Optional — send to a specific topic of a forum supergroup:
+#TELEGRAM_THREAD_ID="123"
 ```
+
+`TELEGRAM_THREAD_ID` is the `message_thread_id` of a topic inside a Telegram
+group with topics (forum supergroup). Leave it empty to post to the main chat.
 
 Any default from the script can be overridden here (storage names, timeouts,
 paths, bridge, etc.). Leave Telegram empty to disable notifications.

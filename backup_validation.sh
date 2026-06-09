@@ -46,7 +46,8 @@ NODE=$(hostname)
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN=""                    # SET in backup_validation.env
-TELEGRAM_CHAT_ID=""                  # SET in backup_validation.env
+TELEGRAM_CHAT_ID=""                  # SET in backup_validation.env (the group/chat id)
+TELEGRAM_THREAD_ID=""                # Optional: topic id in a forum supergroup (message_thread_id)
 TELEGRAM_SILENT_ON_SUCCESS=true      # true = success messages without sound
 
 # ── Execution ─────────────────────────────────────────────────────────────────
@@ -169,10 +170,15 @@ send_telegram() {
         silent="true"
     fi
 
+    # Route to a forum-supergroup topic if a thread id is configured
+    local thread_arg=()
+    [[ -n "$TELEGRAM_THREAD_ID" ]] && thread_arg=(--data-urlencode "message_thread_id=${TELEGRAM_THREAD_ID}")
+
     local response
     response=$(curl -s -X POST \
         "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
         --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+        "${thread_arg[@]}" \
         --data-urlencode "text=${message}" \
         --data-urlencode "parse_mode=Markdown" \
         --data-urlencode "disable_notification=${silent}" 2>&1)
@@ -190,10 +196,14 @@ send_telegram_photo() {
     [[ -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]] && return 0
     [[ -s "$photo" ]] || return 0
 
+    local thread_arg=()
+    [[ -n "$TELEGRAM_THREAD_ID" ]] && thread_arg=(-F "message_thread_id=${TELEGRAM_THREAD_ID}")
+
     local response
     response=$(curl -s -X POST \
         "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto" \
         -F "chat_id=${TELEGRAM_CHAT_ID}" \
+        "${thread_arg[@]}" \
         -F "photo=@${photo}" \
         -F "caption=${caption}" 2>&1)
 
