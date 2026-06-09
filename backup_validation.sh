@@ -225,7 +225,8 @@ get_snapshot_metadata() {
 import sys, json
 try:
     data = json.load(sys.stdin)
-    snaps = [x for x in data if x.get('vmid') == $vmid and x.get('content') == 'backup']
+    # vmid may come back as int or str depending on PVE version — compare as str
+    snaps = [x for x in data if str(x.get('vmid', '')) == '$vmid' and x.get('content') == 'backup']
     snaps.sort(key=lambda x: x.get('ctime', 0), reverse=True)
     if snaps:
         s = snaps[0]
@@ -862,7 +863,9 @@ notify_success() {
 *Duration:* ${duration}
 
 *Checks:*
-$(echo -e "$checks")"
+\`\`\`
+$(echo -e "$checks")
+\`\`\`"
 
     send_telegram "$msg" "OK"
 }
@@ -881,7 +884,9 @@ notify_failure() {
 *Duration:* ${duration}
 
 *Checks:*
+\`\`\`
 $(echo -e "$checks")
+\`\`\`
 *Reason:* \`${reason}\`
 *Log:* \`${LOG_FILE}\`"
 
@@ -918,7 +923,9 @@ send_summary() {
         msg="${msg}
 
 *Failures:*
-$(echo -e "$FAILURES_LIST")"
+\`\`\`
+$(echo -e "$FAILURES_LIST")
+\`\`\`"
         send_telegram "$msg" "FAIL"
     else
         send_telegram "$msg" "OK"
