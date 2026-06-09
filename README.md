@@ -188,3 +188,12 @@ check and validate only the systemd unit (e.g. `cloudflared:0`).
 **Another run in progress**
 - A `flock` prevents overlapping runs. If a previous run is still going (long
   restore), the new one aborts. Lock file: `/var/lock/backup_validation.lock`.
+
+## Author
+
+**Tobias Pandolfo** ([@Tobidp](https://github.com/Tobidp)) — [LinkedIn](https://www.linkedin.com/in/tobiaspandolfo/)
+
+## License
+
+[MIT](LICENSE) © 2026 Tobias Pandolfo.
+Free to use and modify, as long as the original copyright notice is kept.

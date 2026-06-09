@@ -12,6 +12,10 @@
 # Host requires: qm, qmrestore, pvesh, python3, flock, curl (Telegram)
 # Guest requires: qemu-guest-agent running (+ curl/wget for HTTP checks)
 # Config/secrets: /root/backup_validation.env  (override: BACKUP_VALIDATION_ENV)
+#
+# Author:  Tobias Pandolfo (Tobidp) — https://www.linkedin.com/in/tobiaspandolfo/
+# Repo:    https://github.com/Tobidp/pve-backup-validation
+# License: MIT (c) 2026 Tobias Pandolfo — see LICENSE
 # ==============================================================================
 
 set -uo pipefail
