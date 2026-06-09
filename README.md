@@ -18,6 +18,53 @@ Service checks (TCP/HTTP) run **inside the guest** via the QEMU guest agent, so 
   (lets you see GRUB / kernel panic / fsck / emergency shell at a glance)
 - 🗂️ Per-run, per-VM log files
 
+## How it works
+
+For each VMID listed in `backup_validation.conf`, the script runs this flow on
+the PVE node:
+
+```
+backup_validation.conf                 PBS datastore (storage "pbs")
+  105 ; auto   ;        ─┐
+  110 ; hybrid ; ...     │   per VMID
+  210 ; manual ; ...     │
+                         ▼
+       ┌─────────────────────────────────┐
+       │ 1. List backups in PBS          │  pvesh get .../storage/pbs/content
+       │ 2. Filter by VMID, content=backup│  keep vmid == 105
+       │ 3. Pick the NEWEST (by ctime)   │  → volid of the latest snapshot
+       └────────────────┬────────────────┘
+                        ▼
+       ┌─────────────────────────────────┐
+       │ 4. Restore to a TEMP VMID       │  qmrestore <volid> 9000 --unique
+       │    (9000, 9001, … never prod)   │
+       └────────────────┬────────────────┘
+                        ▼
+       ┌─────────────────────────────────┐
+       │ 5. Isolate NIC → vmbr99         │  swap bridge, firewall off
+       │ 6. Boot + wait for guest agent  │
+       └────────────────┬────────────────┘
+                        ▼
+       ┌─────────────────────────────────┐
+       │ 7. Validate INSIDE the guest    │  systemd / TCP / HTTP / custom
+       │    boot, services, ports        │
+       └────────────────┬────────────────┘
+                        ▼
+       ┌─────────────────────────────────┐
+       │ 8. Telegram report (OK / FAIL)  │  + console screenshot on boot fail
+       │ 9. Destroy the temp VM          │  qm destroy 9000 --purge
+       └─────────────────────────────────┘
+```
+
+Key points:
+
+- The source production VM is **only read** — its newest PBS backup is restored
+  into a separate temporary VMID (`9000+`). Production is never touched.
+- "Newest" is decided by the backup's creation time (`ctime`); older snapshots
+  are not tested.
+- The temporary VM is always destroyed at the end (and on interruption). See
+  [Safety](#safety-how-it-avoids-touching-production).
+
 ## Requirements
 
 **On the PVE node (where the script runs):**
