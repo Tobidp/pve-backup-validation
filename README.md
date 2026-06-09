@@ -183,6 +183,17 @@ decides which validation runs after the always-on systemd check:
 All network checks run **inside the guest** via the QEMU guest agent, so they
 work regardless of guest networking, DHCP or routing.
 
+### Failure diagnostics
+
+When a check fails, the report tells you *what* went wrong, not just *that* it did:
+
+- **HTTP:** the actual status code is shown in the alert (e.g. `✗ HTTP 80 (nginx)
+  [500]`) and appended to the reason (`HTTP_FAIL_nginx_80_500`).
+- **systemd:** the unit state and reason are shown (e.g. `✗ systemd: nginx
+  [failed — ActiveState=failed SubState=failed Result=exit-code]`), and the full
+  `systemctl status` + last 15 journal lines are written to the per-VM log.
+- **Boot:** a console screenshot is attached to the Telegram alert (see Features).
+
 ### Why cloudflared is a special case
 
 `cloudflared` (Cloudflare Tunnel) opens **no local listening port** — it makes

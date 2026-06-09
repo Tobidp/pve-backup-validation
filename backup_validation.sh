@@ -102,6 +102,8 @@ TOTAL_FAIL=0
 TOTAL_VMS=0
 FAILURES_LIST=""
 CURRENT_TEMP_VMID=""                 # Temp VM being processed (cleanup on interruption)
+LAST_HTTP_CODE=""                    # Set by check_http_guest (surfaced in the alert)
+LAST_SYSTEMD_DETAIL=""              # Set by check_systemd (compact reason for the alert)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # UTILITY FUNCTIONS
@@ -389,9 +391,25 @@ check_systemd() {
 
     if [[ "$result" == "active" ]]; then
         log "SYSTEMD_OK | VMID=$vmid | SERVICE=$service"
+        LAST_SYSTEMD_DETAIL=""
         return 0
     fi
-    log "SYSTEMD_FAIL | VMID=$vmid | SERVICE=$service | STATUS=$result"
+
+    # Not active — capture WHY: a compact reason for the alert, full diag for the log
+    local props
+    props=$(guest_exec "$vmid" /bin/bash -c \
+        "systemctl show '$service' -p ActiveState,SubState,Result 2>/dev/null | tr '\n' ' '")
+    props=$(echo "$props" | tr -d '\r' | xargs)
+    LAST_SYSTEMD_DETAIL="${result}${props:+ — $props}"
+
+    log "SYSTEMD_FAIL | VMID=$vmid | SERVICE=$service | STATUS=$result | $props"
+
+    local diag
+    diag=$(guest_exec "$vmid" /bin/bash -c \
+        "systemctl status '$service' --no-pager -l 2>&1 | head -n 25; echo '----- journal (last 15) -----'; journalctl -u '$service' -n 15 --no-pager 2>&1")
+    [[ -n "$diag" ]] && log "SYSTEMD_DIAG | VMID=$vmid | SERVICE=$service
+$diag"
+
     return 1
 }
 
@@ -458,17 +476,20 @@ fi
         code=$(echo "$code" | tr -d '[:space:]')
         if [[ "$code" == "NOCLIENT" ]]; then
             log "HTTP_NOCLIENT | VMID=$vmid | PORT=$port | No curl/wget in guest"
+            LAST_HTTP_CODE="NOCLIENT"
             return 2
         fi
         # Accept 2xx, 3xx, 401, 403 (service responding, even if it denies access)
         if [[ "$code" =~ ^(2|3)[0-9]{2}$ ]] || [[ "$code" == "401" ]] || [[ "$code" == "403" ]]; then
             log "HTTP_OK | VMID=$vmid | PORT=$port | CODE=$code (internal)"
+            LAST_HTTP_CODE="$code"
             return 0
         fi
         sleep 3
         (( elapsed += 3 ))
     done
-    log "HTTP_FAIL | VMID=$vmid | PORT=$port | LAST_CODE=${code:-timeout} (internal)"
+    LAST_HTTP_CODE="${code:-timeout}"
+    log "HTTP_FAIL | VMID=$vmid | PORT=$port | LAST_CODE=$LAST_HTTP_CODE (internal)"
     return 1
 }
 
@@ -724,7 +745,7 @@ process_vm() {
             # 7.1 systemd check
             local svc_ok=true
             if ! check_systemd "$temp_vmid" "$svc"; then
-                checks="${checks}  ✗ systemd: ${svc} [inactive]\n"
+                checks="${checks}  ✗ systemd: ${svc} [${LAST_SYSTEMD_DETAIL:-inactive}]\n"
                 final_result="FAIL"
                 failure_reason="SYSTEMD_FAIL_${svc}"
                 svc_ok=false
@@ -755,7 +776,7 @@ process_vm() {
                         check_http_guest "$temp_vmid" "$port" "$endpoint" "$proto"
                         http_rc=$?
                         if (( http_rc == 0 )); then
-                            checks="${checks}  ✓ ${proto^^} ${port} (${svc})\n"
+                            checks="${checks}  ✓ ${proto^^} ${port} (${svc}) [${LAST_HTTP_CODE}]\n"
                         elif (( http_rc == 2 )); then
                             # No HTTP client in guest → at least validate the port is LISTEN
                             if check_tcp_guest "$temp_vmid" "$port"; then
@@ -766,9 +787,9 @@ process_vm() {
                                 failure_reason="PORT_FAIL_${svc}_${port}"
                             fi
                         else
-                            checks="${checks}  ✗ ${proto^^} ${port} (${svc}) [no response]\n"
+                            checks="${checks}  ✗ ${proto^^} ${port} (${svc}) [${LAST_HTTP_CODE}]\n"
                             final_result="FAIL"
-                            failure_reason="${proto^^}_FAIL_${svc}_${port}"
+                            failure_reason="${proto^^}_FAIL_${svc}_${port}_${LAST_HTTP_CODE}"
                         fi
                         ;;
                     tcp)
