@@ -166,6 +166,58 @@ check and validate only the systemd unit (e.g. `cloudflared:0`).
 | RabbitMQ | TCP/5672 |
 | cloudflared | systemd + log scan |
 
+## How checks work
+
+Each signature has the form `PORT:PROTOCOL:ENDPOINT`. The **PROTOCOL** field
+decides which validation runs after the always-on systemd check:
+
+| Protocol | Validation | What it checks |
+|----------|------------|----------------|
+| (any) | `check_systemd` | The unit reports `active` (always runs first) |
+| `tcp` | `check_tcp_guest` | A socket is in `LISTEN` on the port (`ss -ltn`, inside the guest) |
+| `http` / `https` | `check_http_guest` | A request to `127.0.0.1:PORT` returns a valid HTTP code |
+| `none` | — | systemd only (no port to probe, e.g. Docker) |
+| `custom_*` | custom function | Service-specific logic (see below) |
+
+All network checks run **inside the guest** via the QEMU guest agent, so they
+work regardless of guest networking, DHCP or routing.
+
+### Why cloudflared is a special case
+
+`cloudflared` (Cloudflare Tunnel) opens **no local listening port** — it makes
+outbound connections to Cloudflare's edge. So TCP/HTTP probing makes no sense.
+Instead, `check_cloudflared` inspects `journalctl -u cloudflared` and counts only
+**critical** errors. Because the test VM runs on an isolated bridge with no
+internet, connectivity errors are *expected* and are filtered out
+(`network is unreachable`, `no such host`, `dial tcp`, `context deadline`) — only
+real problems (bad config, invalid credentials, parse errors) cause a failure.
+
+### Adding your own custom check
+
+The `custom_*` protocol is an extension hook. To validate a service that doesn't
+fit the port/HTTP model (a queue worker, a backup daemon, etc.):
+
+1. Add a signature with a `custom_<name>` protocol (port `0`):
+   ```bash
+   ["myservice"]="0:custom_myservice:"
+   ```
+2. Write a `check_myservice()` function (use `guest_exec` to run commands inside
+   the guest, mirroring `check_cloudflared`).
+3. Route it in step **7.2** of `process_vm()`:
+   ```bash
+   case "$proto" in
+       custom_cloudflared) ... ;;
+       custom_myservice)
+           if check_myservice "$temp_vmid"; then
+               checks="${checks}  ✓ My check (${svc})\n"
+           else
+               checks="${checks}  ✗ My check (${svc})\n"
+               final_result="FAIL"; failure_reason="MYSERVICE_FAIL_${svc}"
+           fi
+           ;;
+   esac
+   ```
+
 ## Troubleshooting
 
 **Guest agent not responding**
