@@ -51,6 +51,7 @@ TELEGRAM_SILENT_ON_SUCCESS=true      # true = success messages without sound
 
 # ── Execution ─────────────────────────────────────────────────────────────────
 LOCKFILE="/var/lock/backup_validation.lock"   # Ensures a single run (flock)
+TEMP_VM_TAG="backup-validation-temp"          # Tag applied to the throwaway test VM
 
 # ══════════════════════════════════════════════════════════════════════════════
 # ENVIRONMENT FILE LOADING (secrets + overrides)
@@ -457,6 +458,13 @@ fi
 
 cleanup_vm() {
     local vmid=$1
+    # Safety guard: never touch anything below the temporary VMID range.
+    # The only legitimate target is a VM this script created at TEMP_VMID_BASE+.
+    if [[ ! "$vmid" =~ ^[0-9]+$ ]] || (( vmid < TEMP_VMID_BASE )); then
+        log "CLEANUP_REFUSED | VMID='$vmid' is not in the temporary range (>= $TEMP_VMID_BASE) — refusing to destroy"
+        CURRENT_TEMP_VMID=""
+        return 0
+    fi
     if qm status "$vmid" &>/dev/null; then
         log "DESTROY | VMID=$vmid"
         qm stop "$vmid" --skiplock 1 &>/dev/null || true
@@ -538,6 +546,12 @@ process_vm() {
         return 1
     fi
     log "RESTORE_OK | TEMP_VMID=$temp_vmid"
+
+    # Mark the temporary VM as a disposable test artifact (visual safety cue)
+    qm set "$temp_vmid" \
+        --tags "$TEMP_VM_TAG" \
+        --description "TEMP RESTORE TEST — safe to delete. Created by backup_validation.sh from VMID $orig_vmid ($vm_name) at $(date '+%Y-%m-%d %H:%M:%S')." \
+        &>>"$LOG_FILE" || true
 
     # ── 3. Network isolation ──────────────────────────────────────────────────
     local net_config
@@ -827,7 +841,7 @@ parse_args() {
             --help|-h)
                 cat <<EOF
 Usage:
-  $0                                          # Run full cycle from CONFIG_FILE
+  $0 # Run full cycle from CONFIG_FILE
   $0 --vmid VMID [--mode MODE] [--overrides OV] # One-off test of a single VM
 
 Options:
@@ -836,7 +850,7 @@ Options:
   --overrides STRING     "service:port,service:port" (for hybrid/manual)
 
 Examples:
-  $0 --vmid 105                              # Auto-discovery test on VM 105
+  $0 --vmid 105 # Auto-discovery test on VM 105
   $0 --vmid 105 --mode hybrid --overrides "cloudflared:0"
   $0 --vmid 105 --mode manual --overrides "myapp:8080"
 EOF

@@ -1,15 +1,10 @@
 # Proxmox Backup Validation
 
-Automated **test restores** of Proxmox Backup Server (PBS) backups into isolated
-VMs. For each VM it restores the latest backup, boots it on an isolated bridge,
-validates **boot → systemd services → TCP ports → HTTP endpoints**, sends a
-Telegram report, and destroys the temporary VM.
+Automated **test restores** of Proxmox Backup Server (PBS) backups into isolated VMs. For each VM it restores the latest backup, boots it on an isolated bridge, validates **boot → systemd services → TCP ports → HTTP endpoints**, sends a Telegram report, and destroys the temporary VM.
 
-Service checks (TCP/HTTP) run **inside the guest** via the QEMU guest agent, so
-they work even on a fully isolated bridge with no route and no DHCP.
+Service checks (TCP/HTTP) run **inside the guest** via the QEMU guest agent, so they work even on a fully isolated bridge with no route and no DHCP.
 
-> Designed for clusters **without shared storage** (no Ceph): restores pull from
-> PBS, so a single "test node" can validate VMs from any node in the cluster.
+> Designed for clusters **without shared storage** (no Ceph): restores pull from > PBS, so a single "test node" can validate VMs from any node in the cluster.
 
 ## Features
 
@@ -217,6 +212,31 @@ fit the port/HTTP model (a queue worker, a backup daemon, etc.):
            ;;
    esac
    ```
+
+## Safety: how it avoids touching production
+
+The whole safety model rests on **VMID separation**. The script never deletes a
+production VM because:
+
+- **Production and test IDs never cross.** The source VMID (e.g. `105`) is only
+  *read* (its PBS backup is restored). The restore writes to a separate temporary
+  VMID (`TEMP_VMID_BASE` + counter, default `9000`, `9001`, …). `qm stop` and
+  `qm destroy` are **only ever called with the temporary VMID**.
+- **The source VM is never started, stopped or destroyed** — only its backup is read.
+- **It refuses to reuse an existing VMID.** Before restoring, it checks whether
+  the temporary VMID already exists; if so it aborts/skips (`TEMP_VMID_BUSY`)
+  instead of overwriting or deleting. So it only ever destroys a VM **it created
+  itself** at a free, high VMID.
+- **Hard guard in cleanup.** `cleanup_vm` refuses to destroy any VMID below
+  `TEMP_VMID_BASE` — even a bug or misconfiguration cannot make it touch a
+  production ID.
+- **Visible marker.** The test VM is tagged `backup-validation-temp` with a
+  "safe to delete" description, so it is obvious in `qm list` / the web UI.
+
+> ⚠️ Note: the restored test VM inherits the **production VM's name** (the full
+> config is restored). The name is therefore *not* a safe discriminator — only
+> the VMID is. Keep production VMIDs well below `TEMP_VMID_BASE` (Proxmox's
+> 100–999 convention works well) so the two ranges never overlap.
 
 ## Troubleshooting
 
