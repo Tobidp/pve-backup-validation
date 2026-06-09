@@ -1,0 +1,9 @@
+# Local instance files — never commit real secrets or VM lists.
+# Copy the *.example versions and edit those locally / on the node.
+backup_validation.env
+backup_validation.conf
+
+# Runtime artifacts
+*.log
+*.ppm
+*.png

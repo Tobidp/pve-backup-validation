@@ -36,8 +36,8 @@ backup_validation.conf                 PBS datastore (storage "pbs")
        └────────────────┬────────────────┘
                         ▼
        ┌─────────────────────────────────┐
-       │ 4. Restore to a TEMP VMID       │  qmrestore <volid> 9000 --unique
-       │    (9000, 9001, … never prod)   │
+       │ 4. Restore to a TEMP VMID       │  qmrestore <volid> 9105 --unique
+       │    (prefix + VMID, e.g. 105→9105)│
        └────────────────┬────────────────┘
                         ▼
        ┌─────────────────────────────────┐
@@ -52,14 +52,15 @@ backup_validation.conf                 PBS datastore (storage "pbs")
                         ▼
        ┌─────────────────────────────────┐
        │ 8. Telegram report (OK / FAIL)  │  + console screenshot on boot fail
-       │ 9. Destroy the temp VM          │  qm destroy 9000 --purge
+       │ 9. Destroy the temp VM          │  qm destroy 9105 --purge
        └─────────────────────────────────┘
 ```
 
 Key points:
 
 - The source production VM is **only read** — its newest PBS backup is restored
-  into a separate temporary VMID (`9000+`). Production is never touched.
+  into a separate temporary VMID (`TEMP_VMID_PREFIX` + the original VMID, e.g.
+  `105` → `9105`). Production is never touched.
 - "Newest" is decided by the backup's creation time (`ctime`); older snapshots
   are not tested.
 - The temporary VM is always destroyed at the end (and on interruption). See
@@ -125,9 +126,9 @@ The script reads everything from `/root` by default:
 cp backup_validation.sh /root/
 chmod +x /root/backup_validation.sh
 
-cp backup_validation.conf.example /root/backup_validation.conf   # edit it
-cp backup_validation.env          /root/backup_validation.env    # edit it
-chmod 600 /root/backup_validation.env                            # contains secrets
+cp backup_validation.conf.example /root/backup_validation.conf         # edit it
+cp backup_validation.env.example  /root/backup_validation.env          # edit it
+chmod 600 /root/backup_validation.env                                  # contains secrets
 ```
 
 > Save all files with **LF** (Unix) line endings. CRLF is tolerated for the
@@ -284,23 +285,24 @@ production VM because:
 
 - **Production and test IDs never cross.** The source VMID (e.g. `105`) is only
   *read* (its PBS backup is restored). The restore writes to a separate temporary
-  VMID (`TEMP_VMID_BASE` + counter, default `9000`, `9001`, …). `qm stop` and
-  `qm destroy` are **only ever called with the temporary VMID**.
+  VMID built as `TEMP_VMID_PREFIX` + the original VMID (e.g. `105` → `9105`).
+  `qm stop` and `qm destroy` are **only ever called with the temporary VMID**.
 - **The source VM is never started, stopped or destroyed** — only its backup is read.
 - **It refuses to reuse an existing VMID.** Before restoring, it checks whether
   the temporary VMID already exists; if so it aborts/skips (`TEMP_VMID_BUSY`)
   instead of overwriting or deleting. So it only ever destroys a VM **it created
-  itself** at a free, high VMID.
-- **Hard guard in cleanup.** `cleanup_vm` refuses to destroy any VMID below
-  `TEMP_VMID_BASE` — even a bug or misconfiguration cannot make it touch a
-  production ID.
+  itself** at a free VMID.
+- **Hard guard in cleanup.** `cleanup_vm` refuses to destroy any VMID that does
+  not match the temp scheme (`TEMP_VMID_PREFIX` + a real VMID) — even a bug or
+  misconfiguration cannot make it touch a production ID.
 - **Visible marker.** The test VM is tagged `backup-validation-temp` with a
   "safe to delete" description, so it is obvious in `qm list` / the web UI.
 
 > ⚠️ Note: the restored test VM inherits the **production VM's name** (the full
 > config is restored). The name is therefore *not* a safe discriminator — only
-> the VMID is. Keep production VMIDs well below `TEMP_VMID_BASE` (Proxmox's
-> 100–999 convention works well) so the two ranges never overlap.
+> the VMID is. Make sure the prefixed IDs can't collide with real VMs — e.g. with
+> the default prefix `9`, avoid having a production VM `9105` while testing `105`.
+> Keeping production VMIDs in the 100–999 range (Proxmox's convention) avoids this.
 
 ## Troubleshooting
 

@@ -28,7 +28,7 @@ set -uo pipefail
 PBS_STORAGE="pbs"                    # PBS storage name in PVE
 RESTORE_STORAGE="local-lvm"          # Destination storage for the temporary restore
 ISOLATED_BRIDGE="vmbr99"             # Bridge with no route to production
-TEMP_VMID_BASE=9000                  # Temporary VMIDs: 9000, 9001...
+TEMP_VMID_PREFIX="9"                 # Temp VMID = prefix + original VMID (e.g. 675 -> 9675)
 
 # ── Timeouts (seconds) ────────────────────────────────────────────────────────
 BOOT_TIMEOUT=180                     # Wait for boot + guest-agent
@@ -535,10 +535,11 @@ capture_console() {
 
 cleanup_vm() {
     local vmid=$1
-    # Safety guard: never touch anything below the temporary VMID range.
-    # The only legitimate target is a VM this script created at TEMP_VMID_BASE+.
-    if [[ ! "$vmid" =~ ^[0-9]+$ ]] || (( vmid < TEMP_VMID_BASE )); then
-        log "CLEANUP_REFUSED | VMID='$vmid' is not in the temporary range (>= $TEMP_VMID_BASE) — refusing to destroy"
+    # Safety guard: only destroy IDs that match the temp scheme — the prefix
+    # followed by a real VMID (>= 100, i.e. at least 3 digits after the prefix).
+    local min_len=$(( ${#TEMP_VMID_PREFIX} + 3 ))
+    if [[ ! "$vmid" =~ ^[0-9]+$ ]] || [[ "$vmid" != "${TEMP_VMID_PREFIX}"* ]] || (( ${#vmid} < min_len )); then
+        log "CLEANUP_REFUSED | VMID='$vmid' does not match the temp scheme (${TEMP_VMID_PREFIX}<vmid>) — refusing to destroy"
         CURRENT_TEMP_VMID=""
         return 0
     fi
@@ -1008,9 +1009,16 @@ main() {
         exit 1
     fi
 
+    # The prefix must be a positive integer (no leading zero) so the temp VMID is
+    # always strictly larger than the source and well-formed (e.g. 9 + 675 = 9675).
+    if [[ ! "$TEMP_VMID_PREFIX" =~ ^[1-9][0-9]*$ ]]; then
+        log "FATAL | TEMP_VMID_PREFIX must be a positive integer (got '$TEMP_VMID_PREFIX')"
+        exit 1
+    fi
+
     # ── SINGLE TEST MODE ──────────────────────────────────────────────────────
     if [[ "$TEST_MODE" == "single" ]]; then
-        local temp_vmid=$TEMP_VMID_BASE
+        local temp_vmid="${TEMP_VMID_PREFIX}${TEST_VMID}"
 
         if qm status "$temp_vmid" &>/dev/null; then
             log "FATAL | Temporary VMID $temp_vmid already in use"
@@ -1032,8 +1040,6 @@ main() {
         exit 1
     fi
 
-    local counter=0
-
     while IFS=';' read -r orig_vmid mode overrides || [[ -n "$orig_vmid" ]]; do
         # Tolerate CRLF (file edited on Windows) and surrounding spaces
         orig_vmid=$(echo "$orig_vmid" | tr -d '\r' | xargs)
@@ -1043,8 +1049,7 @@ main() {
         [[ "$orig_vmid" =~ ^# ]] && continue
         [[ -z "$orig_vmid" ]] && continue
 
-        local temp_vmid=$(( TEMP_VMID_BASE + counter ))
-        (( counter++ ))
+        local temp_vmid="${TEMP_VMID_PREFIX}${orig_vmid}"
         (( TOTAL_VMS++ ))
 
         if qm status "$temp_vmid" &>/dev/null; then
