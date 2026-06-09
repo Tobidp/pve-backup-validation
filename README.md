@@ -14,6 +14,8 @@ Service checks (TCP/HTTP) run **inside the guest** via the QEMU guest agent, so 
 - 🔒 Isolated bridge, firewall disabled on the test NIC, NIC config preserved
 - 🛡️ Single-run lock (`flock`) and cleanup on interruption (`INT`/`TERM`)
 - 📨 Telegram notifications (success / failure / summary)
+- 📸 On boot failure, a **console screenshot** is attached to the Telegram alert
+  (lets you see GRUB / kernel panic / fsck / emergency shell at a glance)
 - 🗂️ Per-run, per-VM log files
 
 ## Requirements
@@ -23,6 +25,10 @@ Service checks (TCP/HTTP) run **inside the guest** via the QEMU guest agent, so 
 ```bash
 which qm qmrestore pvesh python3 flock curl
 apt install -y curl    # if curl is missing (used for Telegram)
+
+# Optional: only needed to convert console screenshots to PNG on boot failures,
+# and only if your QEMU can't write PNG directly (PVE 8+ usually can).
+apt install -y netpbm  # provides pnmtopng (or use imagemagick's `convert`)
 ```
 
 **On each Linux guest to be validated:**

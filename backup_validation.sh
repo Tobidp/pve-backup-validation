@@ -171,6 +171,26 @@ send_telegram() {
     fi
 }
 
+# Sends an image (e.g. a console screenshot) with a short caption
+send_telegram_photo() {
+    local photo="$1"
+    local caption="$2"
+
+    [[ -z "$TELEGRAM_TOKEN" || -z "$TELEGRAM_CHAT_ID" ]] && return 0
+    [[ -s "$photo" ]] || return 0
+
+    local response
+    response=$(curl -s -X POST \
+        "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendPhoto" \
+        -F "chat_id=${TELEGRAM_CHAT_ID}" \
+        -F "photo=@${photo}" \
+        -F "caption=${caption}" 2>&1)
+
+    if ! echo "$response" | grep -q '"ok":true'; then
+        log "TELEGRAM_PHOTO_FAIL | Response: $response"
+    fi
+}
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SNAPSHOT METADATA COLLECTION (PBS)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -453,6 +473,42 @@ fi
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+# CONSOLE CAPTURE
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Captures the VM's VGA console to a PNG (shows GRUB / kernel panic / fsck /
+# emergency shell — things the guest agent can't see). Echoes the PNG path on
+# success, nothing on failure. $2 = output path WITHOUT extension.
+capture_console() {
+    local vmid=$1
+    local out_base=$2
+    local ppm="${out_base}.ppm"
+    local png="${out_base}.png"
+
+    # Try native PNG first (QEMU 8+); the monitor reads the command from stdin
+    qm monitor "$vmid" <<< "screendump ${png} -f png" &>/dev/null
+    if [[ -s "$png" ]]; then
+        echo "$png"; return 0
+    fi
+
+    # Fallback: dump PPM and convert with netpbm or ImageMagick
+    qm monitor "$vmid" <<< "screendump ${ppm}" &>/dev/null
+    [[ -s "$ppm" ]] || return 1
+
+    if command -v pnmtopng &>/dev/null; then
+        pnmtopng "$ppm" > "$png" 2>/dev/null
+    elif command -v convert &>/dev/null; then
+        convert "$ppm" "$png" 2>/dev/null
+    fi
+
+    if [[ -s "$png" ]]; then
+        rm -f "$ppm"
+        echo "$png"; return 0
+    fi
+    return 1   # no converter available — PPM kept on disk, but not sendable
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CLEANUP
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -589,8 +645,23 @@ process_vm() {
         register_failure "$orig_vmid" "$vm_name" "BOOT_TIMEOUT"
         local vm_duration
         vm_duration=$(format_duration $(( $(date +%s) - vm_start_ts )))
+
+        # The guest agent never came up — capture the console screen, which still
+        # shows whatever stalled the boot (GRUB, kernel panic, fsck, emergency).
+        local console_png
+        console_png=$(capture_console "$temp_vmid" "$vm_log_dir/boot_console_${temp_vmid}")
+        if [[ -n "$console_png" ]]; then
+            log "CONSOLE_CAPTURED | VMID=$temp_vmid | $console_png"
+        else
+            log "CONSOLE_CAPTURE_FAIL | VMID=$temp_vmid | no PNG produced (missing pnmtopng/convert?)"
+        fi
+
         notify_failure "$vm_name" "$orig_vmid" "$temp_vmid" "$snap_date" \
             "$snap_age" "$snap_size" "$vm_duration" "" "BOOT_TIMEOUT"
+
+        [[ -n "$console_png" ]] && send_telegram_photo "$console_png" \
+            "🖥️ ${vm_name} (temp ${temp_vmid}) — console at BOOT_TIMEOUT (GRUB / panic / fsck / emergency?)"
+
         return 1
     fi
 
